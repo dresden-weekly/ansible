@@ -9,6 +9,7 @@ Active Development
 Released
 ++++++++
 
+1.8.2.1 "You Really Got Me" ---- 05-02-2015
 1.8.2  "You Really Got Me" ---- 12-04-2014
 1.8.1  "You Really Got Me" ---- 11-26-2014
 1.8    "You Really Got Me" ---- 11-25-2014
@@ -25,7 +26,7 @@ Released
 1.6.3  "The Cradle Will Rock" - 06-09-2014
 1.6.2  "The Cradle Will Rock" - 05-23-2014
 1.6.1  "The Cradle Will Rock" - 05-07-2014
-1.6    "The Cradle Will Rock" - 05-05-2014 
+1.6    "The Cradle Will Rock" - 05-05-2014
 1.5.5  "Love Walks In" -------- 04-18-2014
 1.5.4  "Love Walks In" -------- 04-01-2014
 1.5.3  "Love Walks In" -------- 03-13-2014

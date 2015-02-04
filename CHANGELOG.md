@@ -1,6 +1,11 @@
 Ansible Changes By Release
 ==========================
 
+## 1.8.2.1 "You Really Got Me" - Feb 05, 2015
+
+* Merged Bugfix #10141 (looping issue)
+* Removed unused V2/ code
+
 ## 1.8.2 "You Really Got Me" - Dec 04, 2014
 
 * Various bug fixes for packaging issues related to modules.
