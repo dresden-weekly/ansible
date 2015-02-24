@@ -1,6 +1,13 @@
 Ansible Changes By Release
 ==========================
 
+## 1.8.4-clean "You Really Got Me" - Feb 24, 2015
+
+This release is intended for direct usage using git clone and hacking setup
+
+* Removed unused V2/ code
+* Removed docs/ and docsite/ folders
+
 ## 1.8.4 "You Really Got Me" - Feb 19, 2015
 
 * Fixed regressions in ec2 and mount modules, introduced in 1.8.3
