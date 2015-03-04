@@ -36,14 +36,14 @@ class Task(object):
     ]
 
     # to prevent typos and such
-    VALID_KEYS = [
+    VALID_KEYS = frozenset((
          'name', 'meta', 'action', 'when', 'async', 'poll', 'notify',
          'first_available_file', 'include', 'tags', 'register', 'ignore_errors',
          'delegate_to', 'local_action', 'transport', 'remote_user', 'sudo', 'sudo_user',
          'sudo_pass', 'when', 'connection', 'environment', 'args',
          'any_errors_fatal', 'changed_when', 'failed_when', 'always_run', 'delay', 'retries', 'until',
          'su', 'su_user', 'su_pass', 'no_log', 'run_once',
-    ]
+    ))
 
     def __init__(self, play, ds, module_vars=None, play_vars=None, play_file_vars=None, role_vars=None, role_params=None, default_vars=None, additional_conditions=None, role_name=None):
         ''' constructor loads from a task or handler datastructure '''
@@ -129,7 +129,7 @@ class Task(object):
 
         # load various attributes
         self.name         = ds.get('name', None)
-        self.tags         = [ 'all' ]
+        self.tags         = [ 'untagged' ]
         self.register     = ds.get('register', None)
         self.sudo         = utils.boolean(ds.get('sudo', play.sudo))
         self.su           = utils.boolean(ds.get('su', play.su))
@@ -315,6 +315,9 @@ class Task(object):
             elif type(apply_tags) == list:
                 self.tags.extend(apply_tags)
         self.tags.extend(import_tags)
+
+        if len(self.tags) > 1:
+            self.tags.remove('untagged')
 
         if additional_conditions:
             new_conditions = additional_conditions[:]

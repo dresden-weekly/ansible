@@ -678,6 +678,7 @@ class Runner(object):
         temp_vars = utils.merge_hash(temp_vars, self.play_vars)
         temp_vars = utils.merge_hash(temp_vars, self.play_file_vars)
         temp_vars = utils.merge_hash(temp_vars, self.extra_vars)
+        temp_vars = utils.merge_hash(temp_vars, {'groups': inject['groups']})
 
         hostvars = HostVars(temp_vars, self.inventory, vault_password=self.vault_pass)
 
@@ -934,6 +935,8 @@ class Runner(object):
             actual_private_key_file = delegate['private_key_file']
             self.sudo_pass = delegate['sudo_pass']
             inject = delegate['inject']
+            # set resolved delegate_to into inject so modules can call _remote_checksum
+            inject['delegate_to'] = self.delegate_to
 
         # user/pass may still contain variables at this stage
         actual_user = template.template(self.basedir, actual_user, inject)
@@ -1344,7 +1347,7 @@ class Runner(object):
 
         # Search module path(s) for named module.
         module_suffixes = getattr(conn, 'default_suffixes', None)
-        module_path = utils.plugins.module_finder.find_plugin(module_name, module_suffixes, transport=self.transport)
+        module_path = utils.plugins.module_finder.find_plugin(module_name, module_suffixes)
         if module_path is None:
             module_path2 = utils.plugins.module_finder.find_plugin('ping', module_suffixes)
             if module_path2 is not None:

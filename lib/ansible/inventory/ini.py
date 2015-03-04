@@ -54,7 +54,10 @@ class InventoryParser(object):
     def _parse_value(v):
         if "#" not in v:
             try:
-                return ast.literal_eval(v)
+                ret = ast.literal_eval(v)
+                if not isinstance(ret, float):
+                    # Do not trim floats. Eg: "1.20" to 1.2
+                    return ret
             # Using explicit exceptions.
             # Likely a string that literal_eval does not like. We wil then just set it.
             except ValueError:

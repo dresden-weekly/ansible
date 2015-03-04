@@ -32,6 +32,8 @@ from ansible.utils.su_prompts import *
 from ansible.utils.hashing import secure_hash, secure_hash_s, checksum, checksum_s, md5, md5s
 from ansible.callbacks import display
 from ansible.module_utils.splitter import split_args, unquote
+from ansible.module_utils.basic import heuristic_log_sanitize
+from ansible.utils.unicode import to_bytes, to_unicode
 import ansible.constants as C
 import ast
 import time
@@ -67,6 +69,11 @@ try:
     import simplejson as json
 except ImportError:
     import json
+
+try:
+    from yaml import CSafeLoader as Loader
+except ImportError:
+    from yaml import SafeLoader as Loader
 
 PASSLIB_AVAILABLE = False
 try:
@@ -446,8 +453,12 @@ def role_yaml_parse(role):
 
 def json_loads(data):
     ''' parse a JSON string and return a data structure '''
+    try:
+        loaded = json.loads(data)
+    except ValueError,e:
+        raise errors.AnsibleError("Unable to read provided data as JSON: %s" % str(e))
 
-    return json.loads(data)
+    return loaded
 
 def _clean_data(orig_data, from_remote=False, from_inventory=False):
     ''' remove jinja2 template tags from a string '''
@@ -588,7 +599,7 @@ def parse_yaml(data, path_hint=None):
                 raise errors.AnsibleError(str(ve))
     else:
         # else this is pretty sure to be a YAML document
-        loaded = yaml.safe_load(data)
+        loaded = yaml.load(data, Loader=Loader)
 
     return loaded
 
@@ -927,39 +938,29 @@ def getch():
         termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
     return ch
 
-def sanitize_output(str):
+def sanitize_output(arg_string):
     ''' strips private info out of a string '''
 
-    private_keys = ['password', 'login_password']
+    private_keys = ('password', 'login_password')
 
-    filter_re = [
-        # filter out things like user:pass@foo/whatever
-        # and http://username:pass@wherever/foo
-        re.compile('^(?P<before>.*:)(?P<password>.*)(?P<after>\@.*)$'),
-    ]
-
-    parts = str.split()
-    output = ''
-    for part in parts:
+    output = []
+    for part in arg_string.split():
         try:
-            (k,v) = part.split('=', 1)
-            if k in private_keys:
-                output += " %s=VALUE_HIDDEN" % k
-            else:
-                found = False
-                for filter in filter_re:
-                    m = filter.match(v)
-                    if m:
-                        d = m.groupdict()
-                        output += " %s=%s" % (k, d['before'] + "********" + d['after'])
-                        found = True
-                        break
-                if not found:
-                    output += " %s" % part
-        except:
-            output += " %s" % part
+            (k, v) = part.split('=', 1)
+        except ValueError:
+            v = heuristic_log_sanitize(part)
+            output.append(v)
+            continue
 
-    return output.strip()
+        if k in private_keys:
+            v = 'VALUE_HIDDEN'
+        else:
+            v = heuristic_log_sanitize(v)
+        output.append('%s=%s' % (k, v))
+
+    output = ' '.join(output)
+    return output
+
 
 ####################################################################
 # option handling code for /usr/bin/ansible and ansible-playbook
@@ -989,6 +990,8 @@ def base_parser(constants=C, usage="", output_opts=False, runas_opts=False,
     parser.add_option('-i', '--inventory-file', dest='inventory',
         help="specify inventory host file (default=%s)" % constants.DEFAULT_HOST_LIST,
         default=constants.DEFAULT_HOST_LIST)
+    parser.add_option('-e', '--extra-vars', dest="extra_vars", action="append",
+        help="set additional variables as key=value or YAML/JSON", default=[])
     parser.add_option('-k', '--ask-pass', default=False, dest='ask_pass', action='store_true',
         help='ask for SSH password')
     parser.add_option('--private-key', default=C.DEFAULT_PRIVATE_KEY_FILE, dest='private_key_file',
@@ -1059,6 +1062,21 @@ def base_parser(constants=C, usage="", output_opts=False, runas_opts=False,
 
     return parser
 
+def parse_extra_vars(extra_vars_opts, vault_pass):
+    extra_vars = {}
+    for extra_vars_opt in extra_vars_opts:
+        extra_vars_opt = to_unicode(extra_vars_opt)
+        if extra_vars_opt.startswith(u"@"):
+            # Argument is a YAML file (JSON is a subset of YAML)
+            extra_vars = combine_vars(extra_vars, parse_yaml_from_file(extra_vars_opt[1:], vault_password=vault_pass))
+        elif extra_vars_opt and extra_vars_opt[0] in u'[{':
+            # Arguments as YAML
+            extra_vars = combine_vars(extra_vars, parse_yaml(extra_vars_opt))
+        else:
+            # Arguments as Key-value
+            extra_vars = combine_vars(extra_vars, parse_kv(extra_vars_opt))
+    return extra_vars
+
 def ask_vault_passwords(ask_vault_pass=False, ask_new_vault_pass=False, confirm_vault=False, confirm_new=False):
 
     vault_pass = None
@@ -1082,36 +1100,47 @@ def ask_vault_passwords(ask_vault_pass=False, ask_new_vault_pass=False, confirm_
 
     # enforce no newline chars at the end of passwords
     if vault_pass:
-        vault_pass = vault_pass.strip()
+        vault_pass = to_bytes(vault_pass, errors='strict', nonstring='simplerepr').strip()
     if new_vault_pass:
-        new_vault_pass = new_vault_pass.strip()
+        new_vault_pass = to_bytes(new_vault_pass, errors='strict', nonstring='simplerepr').strip()
 
     return vault_pass, new_vault_pass
 
 def ask_passwords(ask_pass=False, ask_sudo_pass=False, ask_su_pass=False, ask_vault_pass=False):
     sshpass = None
     sudopass = None
-    su_pass = None
-    vault_pass = None
+    supass = None
+    vaultpass = None
     sudo_prompt = "sudo password: "
     su_prompt = "su password: "
 
     if ask_pass:
         sshpass = getpass.getpass(prompt="SSH password: ")
+        if sshpass:
+            sshpass = to_bytes(sshpass, errors='strict', nonstring='simplerepr')
         sudo_prompt = "sudo password [defaults to SSH password]: "
+        su_prompt = "su password [defaults to SSH password]: "
 
     if ask_sudo_pass:
         sudopass = getpass.getpass(prompt=sudo_prompt)
         if ask_pass and sudopass == '':
             sudopass = sshpass
+        if sudopass:
+            sudopass = to_bytes(sudopass, errors='strict', nonstring='simplerepr')
 
     if ask_su_pass:
-        su_pass = getpass.getpass(prompt=su_prompt)
+        supass = getpass.getpass(prompt=su_prompt)
+        if ask_pass and supass == '':
+            supass = sshpass
+        if supass:
+            supass = to_bytes(supass, errors='strict', nonstring='simplerepr')
 
     if ask_vault_pass:
-        vault_pass = getpass.getpass(prompt="Vault password: ")
+        vaultpass = getpass.getpass(prompt="Vault password: ")
+        if vaultpass:
+            vaultpass = to_bytes(vaultpass, errors='strict', nonstring='simplerepr').strip()
 
-    return (sshpass, sudopass, su_pass, vault_pass)
+    return (sshpass, sudopass, supass, vaultpass)
 
 def do_encrypt(result, encrypt, salt_size=None, salt=None):
     if PASSLIB_AVAILABLE:
@@ -1197,25 +1226,6 @@ def make_su_cmd(su_user, executable, cmd):
         pipes.quote('echo %s; %s' % (success_key, cmd))
     )
     return ('/bin/sh -c ' + pipes.quote(sudocmd), None, success_key)
-
-# For v2, consider either using kitchen or copying my code from there for
-# to_unicode and to_bytes handling (TEK)
-_TO_UNICODE_TYPES = (unicode, type(None))
-
-def to_unicode(value):
-    # Use with caution -- this function is not encoding safe (non-utf-8 values
-    # will cause tracebacks if they contain bytes from 0x80-0xff inclusive)
-    if isinstance(value, _TO_UNICODE_TYPES):
-        return value
-    return value.decode("utf-8")
-
-def to_bytes(value):
-    # Note: value is assumed to be a basestring to mirror to_unicode.  Better
-    # implementations (like kitchen.text.converters.to_bytes) bring that check
-    # into the function
-    if isinstance(value, str):
-        return value
-    return value.encode('utf-8')
 
 def get_diff(diff):
     # called by --diff usage in playbook and runner via callbacks

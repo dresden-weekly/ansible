@@ -28,6 +28,7 @@ import constants
 import locale
 from ansible.color import stringc
 from ansible.module_utils import basic
+from ansible.utils.unicode import to_unicode
 
 import logging
 if constants.DEFAULT_LOG_PATH != '':
@@ -458,11 +459,11 @@ class PlaybookRunnerCallbacks(DefaultRunnerCallbacks):
         if type(results) == dict:
             item = results.get('item', None)
             if isinstance(item, unicode):
-                item = utils.to_bytes(item)
+                item = utils.unicode.to_bytes(item)
             results = basic.json_dict_unicode_to_bytes(results)
         else:
-            results = utils.to_bytes(results)
-        host = utils.to_bytes(host)
+            results = utils.unicode.to_bytes(results)
+        host = utils.unicode.to_bytes(host)
         if item:
             msg = "fatal: [%s] => (item=%s) => %s" % (host, item, results)
         else:
@@ -610,13 +611,13 @@ class PlaybookCallbacks(object):
         call_callback_module('playbook_on_no_hosts_remaining')
 
     def on_task_start(self, name, is_conditional):
-        name = utils.to_bytes(name)
+        name = utils.unicode.to_bytes(name)
         msg = "TASK: [%s]" % name
         if is_conditional:
             msg = "NOTIFIED: [%s]" % name
 
         if hasattr(self, 'start_at'):
-            self.start_at = utils.to_bytes(self.start_at)
+            self.start_at = utils.unicode.to_bytes(self.start_at)
             if name == self.start_at or fnmatch.fnmatch(name, self.start_at):
                 # we found out match, we can get rid of this now
                 del self.start_at
@@ -630,7 +631,7 @@ class PlaybookCallbacks(object):
             self.skip_task = True
         elif hasattr(self, 'step') and self.step:
             if isinstance(name, str):
-                name = utils.to_unicode(name)
+                name = utils.unicode.to_unicode(name)
             msg = u'Perform task: %s (y/n/c): ' % name
             if sys.stdout.encoding:
                 msg = msg.encode(sys.stdout.encoding, errors='replace')
@@ -661,7 +662,7 @@ class PlaybookCallbacks(object):
         else:
             msg = 'input for %s: ' % varname
 
-        def prompt(prompt, private):
+        def do_prompt(prompt, private):
             if sys.stdout.encoding:
                 msg = prompt.encode(sys.stdout.encoding)
             else:
@@ -676,13 +677,13 @@ class PlaybookCallbacks(object):
 
         if confirm:
             while True:
-                result = prompt(msg, private)
-                second = prompt("confirm " + msg, private)
+                result = do_prompt(msg, private)
+                second = do_prompt("confirm " + msg, private)
                 if result == second:
                     break
                 display("***** VALUES ENTERED DO NOT MATCH ****")
         else:
-            result = prompt(msg, private)
+            result = do_prompt(msg, private)
 
         # if result is false and default is not None
         if not result and default is not None:
@@ -690,8 +691,10 @@ class PlaybookCallbacks(object):
 
 
         if encrypt:
-            result = utils.do_encrypt(result,encrypt,salt_size,salt)
+            result = utils.do_encrypt(result, encrypt, salt_size, salt)
 
+        # handle utf-8 chars
+        result = to_unicode(result, errors='strict')
         call_callback_module( 'playbook_on_vars_prompt', varname, private=private, prompt=prompt,
                                encrypt=encrypt, confirm=confirm, salt_size=salt_size, salt=None, default=default
                             )

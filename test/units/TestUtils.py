@@ -11,8 +11,11 @@ import passlib.hash
 import string
 import StringIO
 import copy
+import tempfile
+import shutil
 
 from nose.plugins.skip import SkipTest
+from mock import patch
 
 import ansible.utils
 import ansible.errors
@@ -181,15 +184,9 @@ class TestUtils(unittest.TestCase):
 
     def test_jsonify(self):
         self.assertEqual(ansible.utils.jsonify(None), '{}')
-        self.assertEqual(ansible.utils.jsonify(dict(foo='bar', baz=['qux'])),
-               '{"baz": ["qux"], "foo": "bar"}')
-        expected = '''{
-    "baz": [
-        "qux"
-    ], 
-    "foo": "bar"
-}'''
-        self.assertEqual(ansible.utils.jsonify(dict(foo='bar', baz=['qux']), format=True), expected)
+        self.assertEqual(ansible.utils.jsonify(dict(foo='bar', baz=['qux'])), '{"baz": ["qux"], "foo": "bar"}')
+        expected = u'{"baz":["qux"],"foo":"bar"}'
+        self.assertEqual("".join(ansible.utils.jsonify(dict(foo='bar', baz=['qux']), format=True).split()), expected)
 
     def test_is_failed(self):
         self.assertEqual(ansible.utils.is_failed(dict(rc=0)), False)
@@ -296,7 +293,7 @@ class TestUtils(unittest.TestCase):
             try:
                 ansible.utils.process_yaml_error(exc, data, __file__)
             except ansible.errors.AnsibleYAMLValidationFailed, e:
-                self.assertTrue('Syntax Error while loading' in e.msg)
+                self.assertTrue('Syntax Error while loading' in str(e))
             else:
                 raise AssertionError('Incorrect exception, expected AnsibleYAMLValidationFailed')
 
@@ -307,7 +304,7 @@ class TestUtils(unittest.TestCase):
             try:
                 ansible.utils.process_yaml_error(exc, data, __file__)
             except ansible.errors.AnsibleYAMLValidationFailed, e:
-                self.assertTrue('Syntax Error while loading' in e.msg)
+                self.assertTrue('Syntax Error while loading' in str(e))
             else:
                 raise AssertionError('Incorrect exception, expected AnsibleYAMLValidationFailed')
 
@@ -318,7 +315,7 @@ class TestUtils(unittest.TestCase):
             try:
                 ansible.utils.process_yaml_error(exc, data, __file__)
             except ansible.errors.AnsibleYAMLValidationFailed, e:
-                self.assertTrue('Check over' in e.msg)
+                self.assertTrue('Check over' in str(e))
             else:
                 raise AssertionError('Incorrect exception, expected AnsibleYAMLValidationFailed')
 
@@ -329,7 +326,7 @@ class TestUtils(unittest.TestCase):
             try:
                 ansible.utils.process_yaml_error(exc, data, None)
             except ansible.errors.AnsibleYAMLValidationFailed, e:
-                self.assertTrue('Could not parse YAML.' in e.msg)
+                self.assertTrue('Could not parse YAML.' in str(e))
             else:
                 raise AssertionError('Incorrect exception, expected AnsibleYAMLValidationFailed')
 
@@ -355,7 +352,7 @@ class TestUtils(unittest.TestCase):
         try:
             ansible.utils.parse_yaml_from_file(broken)
         except ansible.errors.AnsibleYAMLValidationFailed, e:
-            self.assertTrue('Syntax Error while loading' in e.msg)
+            self.assertTrue('Syntax Error while loading' in str(e))
         else:
             raise AssertionError('Incorrect exception, expected AnsibleYAMLValidationFailed')
 
@@ -512,15 +509,15 @@ class TestUtils(unittest.TestCase):
         self.assertTrue('echo SUDO-SUCCESS-' in cmd[0] and cmd[2].startswith('SUDO-SUCCESS-'))
 
     def test_to_unicode(self):
-        uni = ansible.utils.to_unicode(u'ansible')
+        uni = ansible.utils.unicode.to_unicode(u'ansible')
         self.assertTrue(isinstance(uni, unicode))
         self.assertEqual(uni, u'ansible')
 
-        none = ansible.utils.to_unicode(None)
+        none = ansible.utils.unicode.to_unicode(None, nonstring='passthru')
         self.assertTrue(isinstance(none, type(None)))
         self.assertTrue(none is None)
 
-        utf8 = ansible.utils.to_unicode('ansible')
+        utf8 = ansible.utils.unicode.to_unicode('ansible')
         self.assertTrue(isinstance(utf8, unicode))
         self.assertEqual(utf8, u'ansible')
 
@@ -597,8 +594,8 @@ class TestUtils(unittest.TestCase):
         try:
             ansible.utils.deprecated('Ack!', '0.0', True)
         except ansible.errors.AnsibleError, e:
-            self.assertTrue('0.0' not in e.msg)
-            self.assertTrue('[DEPRECATED]' in e.msg)
+            self.assertTrue('0.0' not in str(e))
+            self.assertTrue('[DEPRECATED]' in str(e))
         else:
             raise AssertionError("Incorrect exception, expected AnsibleError")
 
@@ -920,3 +917,29 @@ class TestUtils(unittest.TestCase):
         for (role, result) in tests:
             self.assertEqual(ansible.utils.role_yaml_parse(role), result)
 
+    @patch('ansible.utils.plugins.module_finder._get_paths')
+    def test_find_plugin(self, mock_get_paths):
+
+        tmp_path = tempfile.mkdtemp()
+        mock_get_paths.return_value = [tmp_path,]
+        right_module_1 = 'module.py'
+        right_module_2 = 'module_without_extension'
+        wrong_module_1 = 'folder'
+        wrong_module_2 = 'inexistent'
+        path_right_module_1 = os.path.join(tmp_path, right_module_1)
+        path_right_module_2 = os.path.join(tmp_path, right_module_2)
+        path_wrong_module_1 = os.path.join(tmp_path, wrong_module_1)
+        open(path_right_module_1, 'w').close()
+        open(path_right_module_2, 'w').close()
+        os.mkdir(path_wrong_module_1)
+
+        self.assertEqual(ansible.utils.plugins.module_finder.find_plugin(right_module_1),
+                         path_right_module_1)
+        self.assertEqual(ansible.utils.plugins.module_finder.find_plugin(right_module_2),
+                         path_right_module_2)
+        self.assertEqual(ansible.utils.plugins.module_finder.find_plugin(wrong_module_1),
+                         None)
+        self.assertEqual(ansible.utils.plugins.module_finder.find_plugin(wrong_module_2),
+                         None)
+
+        shutil.rmtree(tmp_path)

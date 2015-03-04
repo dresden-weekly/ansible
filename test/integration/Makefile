@@ -19,7 +19,9 @@ MYTMPDIR = $(shell mktemp -d 2>/dev/null || mktemp -d -t 'mytmpdir')
 
 VAULT_PASSWORD_FILE = vault-password
 
-all: parsing test_var_precedence unicode non_destructive destructive includes check_mode test_hash test_handlers test_group_by test_vault
+CONSUL_RUNNING := $(shell python consul_running.py)
+
+all: parsing test_var_precedence unicode test_templating_settings non_destructive destructive includes check_mode test_hash test_handlers test_group_by test_vault test_tags
 
 parsing:
 	ansible-playbook bad_parsing.yml -i $(INVENTORY) -e @$(VARS_FILE) $(CREDENTIALS_ARG) -vvv $(TEST_FLAGS) --tags prepare,common,scenario1; [ $$? -eq 3 ]
@@ -30,15 +32,15 @@ parsing:
 	ansible-playbook good_parsing.yml -i $(INVENTORY) -e @$(VARS_FILE) $(CREDENTIALS_ARG) -v $(TEST_FLAGS)
 
 includes:
-	ansible-playbook test_includes.yml -i $(INVENTORY) -e @$(VARS_FILE) $(CREDENTIALS_ARG) $(TEST_FLAGS) 
+	ansible-playbook test_includes.yml -i $(INVENTORY) -e @$(VARS_FILE) $(CREDENTIALS_ARG) $(TEST_FLAGS)
 
 unicode:
 	ansible-playbook unicode.yml -i $(INVENTORY) -e @$(VARS_FILE) -v $(TEST_FLAGS) -e 'extra_var=café'
 	# Test the start-at-task flag #9571
 	ansible-playbook unicode.yml -i $(INVENTORY) -e @$(VARS_FILE) -v --start-at-task '*¶' -e 'start_at_task=True' $(TEST_FLAGS)
 
-mine:
-	ansible-playbook mine.yml -i $(INVENTORY) -e @$(VARS_FILE) $(CREDENTIALS_ARG) -v $(TEST_FLAGS)
+test_templating_settings:
+	ansible-playbook test_templating_settings.yml -i $(INVENTORY) -e @$(VARS_FILE) $(CREDENTIALS_ARG) -v $(TEST_FLAGS)
 
 non_destructive:
 	ansible-playbook non_destructive.yml -i $(INVENTORY) -e @$(VARS_FILE) $(CREDENTIALS_ARG) -v $(TEST_FLAGS)
@@ -80,6 +82,15 @@ test_delegate_to:
 test_winrm:
 	ansible-playbook test_winrm.yml -i inventory.winrm -e @$(VARS_FILE) $(CREDENTIALS_ARG) -v $(TEST_FLAGS)
 
+test_tags:
+	# Run everything by default
+	[ "$$(ansible-playbook --list-tasks test_tags.yml -i $(INVENTORY) -e @$(VARS_FILE) $(CREDENTIALS_ARG) -v $(TEST_FLAGS) | fgrep Task_with | xargs)" = "Task_with_tag Task_with_always_tag Task_without_tag" ]
+	# Run the exact tags, and always
+	[ "$$(ansible-playbook --list-tasks --tags tag test_tags.yml -i $(INVENTORY) -e @$(VARS_FILE) $(CREDENTIALS_ARG) -v $(TEST_FLAGS) | fgrep Task_with | xargs)" = "Task_with_tag Task_with_always_tag" ]
+	# Skip one tag
+	[ "$$(ansible-playbook --list-tasks --skip-tags tag test_tags.yml -i $(INVENTORY) -e @$(VARS_FILE) $(CREDENTIALS_ARG) -v $(TEST_FLAGS) | fgrep Task_with | xargs)" = "Task_with_always_tag Task_without_tag" ]
+
+
 cloud: amazon rackspace
 
 cloud_cleanup: amazon_cleanup rackspace_cleanup
@@ -118,6 +129,16 @@ rackspace: $(CREDENTIALS_FILE)
     RC=$$? ; \
     CLOUD_RESOURCE_PREFIX="$(CLOUD_RESOURCE_PREFIX)" make rackspace_cleanup ; \
     exit $$RC;
+
+$(CONSUL_RUNNING):
+
+consul:
+ifeq ($(CONSUL_RUNNING), True)
+	ansible-playbook -i $(INVENTORY) consul.yml ; \
+	ansible-playbook -i ../../plugins/inventory/consul_io.py consul_inventory.yml
+else
+	@echo "Consul agent is not running locally. To run a cluster locally see http://github.com/sgargan/consul-vagrant"
+endif
 
 test_galaxy: test_galaxy_spec test_galaxy_yaml
 
